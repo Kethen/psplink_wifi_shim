@@ -251,11 +251,33 @@ static void hook_thread_creation(){
 #define hook_thread_creation(...)
 #endif
 
+static int (*create_heap_orig)(int part, int size, int unk, const char *name) = NULL;
+static int create_heap(int part, int size, uint32_t unk, const char *name){
+	// heap creation fails even when p2 has free space in some games.....
+	int target_part = partition_to_use();
+	if (strcmp(name, "SceNet") == 0){
+		part = target_part;
+		unk = unk | 2; // seems to be high align flag
+		int old_size = size;
+		size = 3 * 1024 * 1024;
+		LOG("%s: redirecting networking heap to partition %d and enlarging it to %d from %d\n", __func__, part, size, old_size);
+	}
+	int ret = create_heap_orig(part, size, unk, name);
+	LOG("%s: part %d size %d unk 0x%lx name %s, 0x%x\n", __func__, part, size, unk, name, ret);
+
+	return ret;
+}
+
+static void hook_heap_creation(){
+	HIJACK_FUNCTION(GET_JUMP_TARGET(*(uint32_t *)sceKernelCreateHeap), create_heap, create_heap_orig);
+}
+
 int module_start(SceSize args, void *argp){
 	LOG_INIT();
 	LOG("%s: module started\n", __func__);
 	hook_module_loading();
 	hook_thread_creation();
+	hook_heap_creation();
 	memlayout_hack();
 	log_memory_info();
 	return 0;
