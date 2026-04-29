@@ -225,7 +225,10 @@ static void hook_module_loading(){
 #if 1
 static int (*create_thread_orig)(const char *name, void *entry, int priority, int stack_size, int attr, void *option) = NULL;
 static int create_thread(const char *name, void *entry, int priority, int stack_size, int attr, void *option){
-	if (strcmp(name, "netshell recv thread") == 0 || strcmp(name, "netshell send thread") == 0){
+	if (strcmp(name, "netshell recv thread") == 0 ||
+		strcmp(name, "netshell send thread") == 0 ||
+		strcmp(name, "netshell main") == 0
+	){
 		static SceKernelThreadOptParam opt = {.size = sizeof(SceKernelThreadOptParam), .stackMpid = 0};
 		opt.stackMpid = partition_to_use();
 		uint32_t k1 = pspSdkSetK1(0);

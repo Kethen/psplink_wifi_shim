@@ -39,6 +39,38 @@ PSP_MAIN_THREAD_NAME("NetShell");
 
 #define printf pspDebugScreenPrintf
 
+#define socket sceNetInetSocket
+#define bind sceNetInetBind
+#define listen sceNetInetListen
+#define accept sceNetInetAccept
+#define recv sceNetInetRecv
+#define send sceNetInetSend
+#define close sceNetInetClose
+#define setsockopt sceNetInetSetsockopt
+#undef errno
+#define errno sceNetInetGetErrno()
+
+void *memcpy(void *dst, const void *src, unsigned int cnt){
+	for(int i = 0;i < cnt;i++){
+		((uint8_t*)dst)[i] = ((uint8_t*)src)[i];
+	}
+	return dst;
+}
+
+void *memset(void *dst, int val, unsigned int cnt){
+	for(int i = 0;i < cnt;i++){
+		((uint8_t*)dst)[i] = (uint8_t)val;
+	}
+	return dst;
+}
+
+char *inet_ntoa(struct in_addr in){
+	static char buf[64];
+	memset(buf, 0, sizeof(buf));
+	sceNetInetInetNtop(AF_INET, &in.s_addr, buf, sizeof(buf));
+	return buf;
+}
+
 int psplinkParseCommand(char *command);
 void psplinkPrintPrompt(void);
 void psplinkExitShell(void);
@@ -46,7 +78,7 @@ void ttySetWifiHandler(PspDebugPrintHandler wifiHandler);
 
 int g_currsock = -1;
 int g_servsock = -1;
-int g_size = 0;
+unsigned int g_size = 0;
 char g_data[32 * 1024];
 int g_data_lock = 0;
 
@@ -113,13 +145,7 @@ int send_thread_func(unsigned int args, void *argp){
 	}
 	while(1){
 		if (g_currsock < 0){
-			g_size = 0;
 			sceKernelDelayThread(100000);
-			continue;
-		}
-
-		if (g_size == 0){
-			sceKernelDelayThread(5000);
 			continue;
 		}
 
@@ -128,16 +154,24 @@ int send_thread_func(unsigned int args, void *argp){
 		}
 		g_data_lock = 1;
 
+		if (g_size == 0){
+			g_data_lock = 0;
+			sceKernelDelayThread(5000);
+			continue;
+		}
+
+		int size = g_size > sizeof(g_data) ? sizeof(g_data) : g_size;
+
 		fd = sceIoOpen("ms0:/netshell.txt", PSP_O_APPEND | PSP_O_CREAT | PSP_O_WRONLY, 0777);
 		if (fd >= 0){
-			sceIoWrite(fd, g_data, g_size);
+			sceIoWrite(fd, g_data, size);
 			sceIoClose(fd);
 		}
-		//pspDebugScreenPrintf("%s: starting send of %d byte data [%s]\n", __func__, g_size, log_buf);
+		//pspDebugScreenPrintf("%s: starting send of %d bytes of data\n", __func__, size);
 		int send_status = 0;
 		#if 1
 		while(1){
-			send_status = send(g_currsock, g_data, g_size, MSG_DONTWAIT);
+			send_status = send(g_currsock, g_data, size, MSG_DONTWAIT);
 			if (send_status == -1 && (errno == EWOULDBLOCK || errno == EAGAIN)){
 				sceKernelDelayThread(5000);
 				continue;
@@ -177,6 +211,7 @@ int recv_thread_func(unsigned int args, void *argp){
 		}
 
 		char data;
+		//pspDebugScreenPrintf("%s: starting data receive\n", __func__);
 		#if 1
 		int recv_status = recv(g_currsock, &data, 1, MSG_DONTWAIT);
 		if (recv_status == -1 && (errno == EWOULDBLOCK || errno == EAGAIN)){
@@ -186,6 +221,7 @@ int recv_thread_func(unsigned int args, void *argp){
 		#else
 		int recv_status = recv(g_currsock, &data, 1, 0);
 		#endif
+		//pspDebugScreenPrintf("%s: data received\n", __func__);
 		if (recv_status != 1){
 			if (recv_status == 0){
 				pspDebugScreenPrintf("%s: remote closed the socket\n", __func__);
@@ -232,6 +268,7 @@ int recv_thread_func(unsigned int args, void *argp){
 	return 0;
 }
 
+
 /* Start a simple tcp echo server */
 void start_server(const char *szIpAddr)
 {
@@ -270,7 +307,7 @@ void start_server(const char *szIpAddr)
 		int new_sock = accept(sock, (struct sockaddr *) &client, &addr_size);
 		if(new_sock < 0)
 		{
-			pspDebugScreenPrintf("Error in accept %s\n", strerror(errno));
+			pspDebugScreenPrintf("Error in accept %d\n", errno);
 			close(sock);
 			g_servsock = -1;
 			return;
@@ -295,7 +332,7 @@ void start_server(const char *szIpAddr)
 }
 
 /* Simple thread */
-int main(int argc, char **argv)
+int main_thread_func(unsigned int args, void *arg)
 {
 	pspDebugScreenPrintf("PSPLink NetShell (c) 2k6 TyRaNiD\n");
 
@@ -306,8 +343,12 @@ int main(int argc, char **argv)
 		start_server(ip);
 	}
 
-	sceKernelSleepThread();
+	return 0;
+}
 
+int module_start(SceSize args, void *argp){
+	int tid = sceKernelCreateThread("netshell main", main_thread_func, 0x18, 8192, 0, NULL);
+	sceKernelStartThread(tid, 0, NULL);
 	return 0;
 }
 
