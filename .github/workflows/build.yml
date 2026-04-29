@@ -19,7 +19,7 @@ jobs:
 
     - name: Build
       run: |
-        docker run --rm -i -v ./:/work_dir -w /work_dir "$PSPDEV_TAG" make
+        docker run --rm -i -v ./:/work_dir -w /work_dir "$PSPDEV_TAG" bash -c 'make; cd netshell; make'
 
     - name: Push package artifact
       uses: actions/upload-artifact@v4
@@ -27,4 +27,5 @@ jobs:
         name: psplink_wifi_shim_${{ env.sha_name }}
         path: |
           psplink_wifi_shim.prx
+          netshell/netshell.prx
         if-no-files-found: error
