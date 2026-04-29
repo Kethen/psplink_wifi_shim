@@ -222,10 +222,37 @@ static void hook_module_loading(){
 	HIJACK_FUNCTION(GET_JUMP_TARGET(*(uint32_t*)sceKernelLoadModule), load_module, load_module_orig);
 }
 
+#if 1
+static int (*create_thread_orig)(const char *name, void *entry, int priority, int stack_size, int attr, void *option) = NULL;
+static int create_thread(const char *name, void *entry, int priority, int stack_size, int attr, void *option){
+	if (strcmp(name, "netshell recv thread") == 0 || strcmp(name, "netshell send thread") == 0){
+		static SceKernelThreadOptParam opt = {.size = sizeof(SceKernelThreadOptParam), .stackMpid = 0};
+		opt.stackMpid = partition_to_use();
+		uint32_t k1 = pspSdkSetK1(0);
+		int create_status = create_thread_orig(name, entry, priority, stack_size, PSP_THREAD_ATTR_USER, &opt);
+		pspSdkSetK1(k1);
+		return create_status;
+	}
+	if (strcmp(name, "PspLinkParse") == 0){
+		return create_thread_orig(name, entry, priority, 256 * 1024, attr, option);
+
+	}
+
+	return create_thread_orig(name, entry, priority, stack_size, attr, option);
+}
+
+static void hook_thread_creation(){
+	HIJACK_FUNCTION(GET_JUMP_TARGET(*(uint32_t*)sceKernelCreateThread), create_thread, create_thread_orig);
+}
+#else
+#define hook_thread_creation(...)
+#endif
+
 int module_start(SceSize args, void *argp){
 	LOG_INIT();
 	LOG("%s: module started\n", __func__);
 	hook_module_loading();
+	hook_thread_creation();
 	memlayout_hack();
 	log_memory_info();
 	return 0;

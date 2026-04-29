@@ -8,4 +8,7 @@ podman run \
 	bash -c "
 make clean
 make
+cd netshell
+make clean
+make
 "
