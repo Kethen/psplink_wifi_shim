@@ -254,9 +254,8 @@ static void hook_thread_creation(){
 static int (*create_heap_orig)(int part, int size, int unk, const char *name) = NULL;
 static int create_heap(int part, int size, uint32_t unk, const char *name){
 	// heap creation fails even when p2 has free space in some games.....
-	int target_part = partition_to_use();
 	if (strcmp(name, "SceNet") == 0){
-		part = target_part;
+		part = partition_to_use();
 		unk = unk | 2; // seems to be high align flag
 		int old_size = size;
 		size = 3 * 1024 * 1024;
@@ -286,4 +285,8 @@ int module_start(SceSize args, void *argp){
 int module_stop(SceSize args, void *argp){
 	LOG("%s: attempting to stop this module, but unload is not really implemented...\n", __func__);
 	return 0;
+}
+
+uint32_t get_kernel_delay_thread_function(){
+	return GET_JUMP_TARGET(*(uint32_t*)sceKernelDelayThread);
 }

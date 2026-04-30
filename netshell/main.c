@@ -85,7 +85,9 @@ int g_data_lock = 0;
 
 #define SERVER_PORT 10000
 
-int wifiPrint(const char *data, int size)
+static int (*kernel_delay_thread_function)(unsigned int delay) = NULL;
+
+static int kernel_print_callback(const char *data, int size)
 {
 	if (g_currsock < 0){
 		return size;
@@ -97,7 +99,7 @@ int wifiPrint(const char *data, int size)
 		if (total_wait_time > 100000){
 			return size;
 		}
-		sceKernelDelayThread(5000);
+		kernel_delay_thread_function(5000);
 		total_wait_time += 5000;
 	}
 	g_data_lock = 1;
@@ -112,7 +114,7 @@ int wifiPrint(const char *data, int size)
 	return size;
 }
 
-int make_socket(uint16_t port)
+static int make_socket(uint16_t port)
 {
 	int sock;
 	int ret;
@@ -136,7 +138,7 @@ int make_socket(uint16_t port)
 	return sock;
 }
 
-int send_thread_func(unsigned int args, void *argp){
+static int send_thread_func(unsigned int args, void *argp){
 	int fd = sceIoOpen("ms0:/netshell.txt", PSP_O_TRUNC | PSP_O_CREAT | PSP_O_WRONLY, 0777);
 	if (fd >= 0){
 		sceIoClose(fd);
@@ -179,7 +181,6 @@ int send_thread_func(unsigned int args, void *argp){
 		#else
 		send_status = send(g_currsock, g_data, g_size, 0);
 		#endif
-		//pspDebugScreenPrintf("%s: send finished\n", __func__);
 		// we are assuming that anything we send will just fit into send buffer here...
 		if(send_status < 0)
 		{
@@ -190,6 +191,7 @@ int send_thread_func(unsigned int args, void *argp){
 			g_size = 0;
 			continue;
 		}
+		//pspDebugScreenPrintf("%s: send finished\n", __func__);
 		g_size = 0;
 		g_data_lock = 0;
 
@@ -198,9 +200,9 @@ int send_thread_func(unsigned int args, void *argp){
 	return 0;
 }
 
-int recv_thread_func(unsigned int args, void *argp){
-	char cli[1024];
-	int pos = 0;
+static int recv_thread_func(unsigned int args, void *argp){
+	static char cli[1024] = {0};
+	static int pos = 0;
 	while(1){
 		if (g_currsock < 0){
 			pos = 0;
@@ -219,7 +221,7 @@ int recv_thread_func(unsigned int args, void *argp){
 		#else
 		int recv_status = recv(g_currsock, &data, 1, 0);
 		#endif
-		//pspDebugScreenPrintf("%s: data received, %c\n", __func__, data);
+		//pspDebugScreenPrintf("%s: data received\n", __func__);
 		if (recv_status != 1){
 			if (recv_status == 0){
 				pspDebugScreenPrintf("%s: remote closed the socket\n", __func__);
@@ -271,7 +273,7 @@ int recv_thread_func(unsigned int args, void *argp){
 
 
 /* Start a simple tcp echo server */
-void start_server(const char *szIpAddr)
+static void start_server(const char *szIpAddr)
 {
 	int ret;
 	int sock;
@@ -282,7 +284,7 @@ void start_server(const char *szIpAddr)
 	tid = sceKernelCreateThread("netshell send thread", send_thread_func, 0x18, 8192, 0, NULL);
 	sceKernelStartThread(tid, 0, NULL);
 
-	ttySetWifiHandler(wifiPrint);
+	ttySetWifiHandler(kernel_print_callback);
 
 	/* Create a socket for listening */
 	sock = make_socket(SERVER_PORT);
@@ -339,10 +341,14 @@ void start_server(const char *szIpAddr)
 	g_servsock = -1;
 }
 
+void *get_kernel_delay_thread_function();
 /* Simple thread */
-int main_thread_func(unsigned int args, void *arg)
+static int main_thread_func(unsigned int args, void *arg)
 {
 	pspDebugScreenPrintf("PSPLink NetShell (c) 2k6 TyRaNiD\n");
+
+	kernel_delay_thread_function = get_kernel_delay_thread_function();
+	pspDebugScreenPrintf("%s: kernel delay thread function is at 0x%lx\n", __func__, (uint32_t)kernel_delay_thread_function);
 
 	if(modNetIsInit() >= 0)
 	{
