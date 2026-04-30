@@ -261,7 +261,7 @@ static int recv_thread_func(unsigned int args, void *argp){
 					close(currsock);
 					psplinkExitShell();
 				}
-				sceKernelDelayThread(100000);
+				sceKernelDelayThread(500000);
 			}
 		}
 		else if(pos < (sizeof(cli) -1))
