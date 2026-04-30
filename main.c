@@ -239,7 +239,7 @@ static int create_thread(const char *name, void *entry, int priority, int stack_
 		return create_status;
 	}
 	if (strcmp(name, "PspLinkParse") == 0){
-		return create_thread_orig(name, entry, priority, 256 * 1024, attr, option);
+		return create_thread_orig(name, entry, priority, stack_size, attr, option);
 
 	}
 
@@ -273,6 +273,34 @@ static void hook_heap_creation(){
 	HIJACK_FUNCTION(GET_JUMP_TARGET(*(uint32_t *)sceKernelCreateHeap), create_heap, create_heap_orig);
 }
 
+static void *find_module_func_offset_by_pattern(const char *mod_name, const uint8_t *pattern, int pattern_len){
+	SceUID module_ids[1024];
+	int num_modules = 0;
+
+	sceKernelGetModuleIdList(module_ids, sizeof(module_ids), &num_modules);
+	for(int i = 0;i < num_modules;i++){
+		SceKernelModuleInfo info = {0};
+		info.size = sizeof(info);
+		int query_status = sceKernelQueryModuleInfo(module_ids[i], &info);
+		if (query_status != 0){
+			continue;
+		}
+
+		if (strcmp(info.name, mod_name) != 0){
+			continue;
+		}
+
+		for (uint32_t offset = 0;offset < info.text_size - pattern_len;offset++){
+			uint8_t *check = (uint8_t *)(info.text_addr + offset);
+			if (memcmp(check, pattern, pattern_len) == 0){
+				return check;
+			}
+		}
+	}
+
+	return NULL;
+}
+
 static const char *to_psplink_input = NULL;
 static int psplink_input_ret = 2;
 
@@ -285,15 +313,39 @@ int send_input_to_psplink_thread_func(unsigned int args, void *arg){
 		}
 
 		static int (*psplink_parse)(const char *input) = NULL;
+		static int (*fast_path)(const char *input) = NULL;
+		static void (*print_prompt)() = NULL;
 		if (psplink_parse == NULL){
 			psplink_parse = (void *)sctrlHENFindFunction("PSPLINK", "psplink", 0x8B5F450B);
+			LOG("%s: psplink_parse found at 0x%x\n", __func__, (unsigned int)psplink_parse);
 		}
-		if (psplink_parse == NULL){
+		if (print_prompt == NULL){
+			print_prompt = (void *)sctrlHENFindFunction("PSPLINK", "psplink", 0xE3010EA1);
+			LOG("%s: print_prompt found at 0x%x\n", __func__, (unsigned int)print_prompt);
+		}
+		if (fast_path == NULL){
+			static const uint8_t pattern[] = {0xa0, 0xeb, 0xbd, 0x27, 0x4c, 0x14, 0xb0, 0xaf};
+			fast_path = find_module_func_offset_by_pattern("PSPLINK", pattern, sizeof(pattern));
+			LOG("%s: fast_path found at 0x%x\n", __func__, (unsigned int)fast_path);
+		}
+		if (psplink_parse == NULL && fast_path == NULL){
+			// psplink is likely not loaded yet
 			psplink_input_ret = 0;
 			to_psplink_input = NULL;
 			continue;
 		}
 
+		if (fast_path != NULL){
+			// just need to block here, the other side does not handle message status
+			// blocking here also fixes parse sychrnoization issues during parsing
+			fast_path(to_psplink_input);
+			if (print_prompt != NULL) print_prompt();
+			psplink_input_ret = 0;
+			to_psplink_input = NULL;
+			continue;
+		}
+
+		// mbx is weird in there, we ideally get the fast path and run that directly, since wifi is the only expected shell anyway
 		psplink_input_ret = psplink_parse(to_psplink_input);
 		to_psplink_input = NULL;
 	}
@@ -311,7 +363,7 @@ int send_input_to_psplink(const char *input){
 }
 
 void create_psplink_send_thread(){
-	int tid = sceKernelCreateThread("psplink_wifi_shim stack hack", send_input_to_psplink_thread_func, 0x18, 4096, 0, NULL);
+	int tid = sceKernelCreateThread("psplink_wifi_shim stack hack", send_input_to_psplink_thread_func, 0x18, 256 * 1024, 0, NULL);
 	sceKernelStartThread(tid, 0, NULL);
 }
 
