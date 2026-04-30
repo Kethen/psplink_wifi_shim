@@ -1,0 +1,16 @@
+PSP_BEGIN_EXPORTS
+
+PSP_EXPORT_START(syslib, 0, 0x8000)
+PSP_EXPORT_FUNC_HASH(module_start)
+PSP_EXPORT_FUNC_HASH(module_stop)
+PSP_EXPORT_VAR_HASH(module_info)
+PSP_EXPORT_END
+
+PSP_EXPORT_START(psplink_wifi_shim, 0, 0x4001)
+PSP_EXPORT_FUNC_NID(get_kernel_delay_thread_function, 0x001)
+PSP_EXPORT_FUNC_NID(send_input_to_psplink, 0x002)
+PSP_EXPORT_FUNC_NID(register_buffer_consumer, 0x003)
+PSP_EXPORT_FUNC_NID(get_is_cpu_intr_enable_function, 0x004)
+PSP_EXPORT_END
+
+PSP_END_EXPORTS
