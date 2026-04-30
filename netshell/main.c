@@ -161,17 +161,21 @@ static int send_thread_func(unsigned int args, void *argp){
 		}
 
 		int size = g_size > sizeof(g_data) ? sizeof(g_data) : g_size;
+		static char data_copy[sizeof(g_data)];
+		memcpy(data_copy, g_data, size);
+		g_size = 0;
+		g_data_lock = 0;
 
 		fd = sceIoOpen("ms0:/netshell.txt", PSP_O_APPEND | PSP_O_CREAT | PSP_O_WRONLY, 0777);
 		if (fd >= 0){
-			sceIoWrite(fd, g_data, size);
+			sceIoWrite(fd, data_copy, size);
 			sceIoClose(fd);
 		}
 		//pspDebugScreenPrintf("%s: starting send of %d bytes of data\n", __func__, size);
 		int send_status = 0;
 		#if 1
 		while(1){
-			send_status = send(g_currsock, g_data, size, MSG_DONTWAIT);
+			send_status = send(g_currsock, data_copy, size, MSG_DONTWAIT);
 			if (send_status == -1 && (errno == EWOULDBLOCK || errno == EAGAIN)){
 				sceKernelDelayThread(5000);
 				continue;
@@ -179,7 +183,7 @@ static int send_thread_func(unsigned int args, void *argp){
 			break;
 		}
 		#else
-		send_status = send(g_currsock, g_data, g_size, 0);
+		send_status = send(g_currsock, data_copy, size, 0);
 		#endif
 		// we are assuming that anything we send will just fit into send buffer here...
 		if(send_status < 0)
@@ -192,8 +196,6 @@ static int send_thread_func(unsigned int args, void *argp){
 			continue;
 		}
 		//pspDebugScreenPrintf("%s: send finished\n", __func__);
-		g_size = 0;
-		g_data_lock = 0;
 
 		sceKernelDelayThread(0);
 	}
