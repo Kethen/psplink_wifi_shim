@@ -16,4 +16,4 @@ LIBS = -lpspsystemctrl_kernel
 PSP_FW_VERSION=661
 
 PSPSDK = $(shell psp-config --pspsdk-path)
-include $(PSPSDK)/lib/build_prx.mak
+include $(PSPSDK)/lib/build.mak

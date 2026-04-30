@@ -28,6 +28,7 @@
 
 #define LOG_PATH "ms0:/psplink_wifi_shim.log"
 #define LOG(...){ \
+	uint32_t k1 = pspSdkSetK1(0); \
 	int _fd = sceIoOpen(LOG_PATH, PSP_O_WRONLY | PSP_O_APPEND | PSP_O_CREAT, 0777); \
 	if (_fd > 0){ \
 		char _log_buf[256]; \
@@ -35,6 +36,7 @@
 		sceIoWrite(_fd, _log_buf, _len); \
 		sceIoClose(_fd); \
 	} \
+	pspSdkSetK1(k1); \
 }
 
 #define LOG_INIT(...){ \
@@ -44,7 +46,7 @@
 	} \
 }
 
-PSP_MODULE_INFO("midmem_layout", PSP_MODULE_KERNEL, 1, 0);
+PSP_MODULE_INFO("psplink_wifi_shim", PSP_MODULE_KERNEL, 1, 0);
 
 static int is_vita(){
 	static int vita = -1;
@@ -288,5 +290,6 @@ int module_stop(SceSize args, void *argp){
 }
 
 uint32_t get_kernel_delay_thread_function(){
+	int value_in_kernel_stack = 0;
 	return GET_JUMP_TARGET(*(uint32_t*)sceKernelDelayThread);
 }
