@@ -273,6 +273,48 @@ static void hook_heap_creation(){
 	HIJACK_FUNCTION(GET_JUMP_TARGET(*(uint32_t *)sceKernelCreateHeap), create_heap, create_heap_orig);
 }
 
+static const char *to_psplink_input = NULL;
+static int psplink_input_ret = 2;
+
+int send_input_to_psplink_thread_func(unsigned int args, void *arg){
+	// this is funky, last release of wifi psplink sends a mbx on stack memory, so this is to create stable-ish stack memory for that function
+	while(1){
+		if (to_psplink_input == NULL){
+			sceKernelDelayThread(5000);
+			continue;
+		}
+
+		static int (*psplink_parse)(const char *input) = NULL;
+		if (psplink_parse == NULL){
+			psplink_parse = (void *)sctrlHENFindFunction("PSPLINK", "psplink", 0x8B5F450B);
+		}
+		if (psplink_parse == NULL){
+			psplink_input_ret = 0;
+			to_psplink_input = NULL;
+			continue;
+		}
+
+		psplink_input_ret = psplink_parse(to_psplink_input);
+		to_psplink_input = NULL;
+	}
+}
+
+int send_input_to_psplink(const char *input){
+	psplink_input_ret = 2;
+	to_psplink_input = input;
+
+	while(psplink_input_ret == 2){
+		sceKernelDelayThread(5000);
+	}
+
+	return psplink_input_ret;
+}
+
+void create_psplink_send_thread(){
+	int tid = sceKernelCreateThread("psplink_wifi_shim stack hack", send_input_to_psplink_thread_func, 0x18, 4096, 0, NULL);
+	sceKernelStartThread(tid, 0, NULL);
+}
+
 int module_start(SceSize args, void *argp){
 	LOG_INIT();
 	LOG("%s: module started\n", __func__);
@@ -281,6 +323,7 @@ int module_start(SceSize args, void *argp){
 	hook_heap_creation();
 	memlayout_hack();
 	log_memory_info();
+	create_psplink_send_thread();
 	return 0;
 }
 
@@ -290,6 +333,7 @@ int module_stop(SceSize args, void *argp){
 }
 
 uint32_t get_kernel_delay_thread_function(){
-	int value_in_kernel_stack = 0;
 	return GET_JUMP_TARGET(*(uint32_t*)sceKernelDelayThread);
 }
+
+

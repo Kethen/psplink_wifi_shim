@@ -202,6 +202,7 @@ static int send_thread_func(unsigned int args, void *argp){
 	return 0;
 }
 
+int send_input_to_psplink(const char *input);
 static int recv_thread_func(unsigned int args, void *argp){
 	static char cli[1024] = {0};
 	static int pos = 0;
@@ -249,7 +250,7 @@ static int recv_thread_func(unsigned int args, void *argp){
 				cli[pos] = 0;
 				//pspDebugScreenPrintf("%s: forwarding cli input [%s] to psplink\n", __func__, cli);
 				pos = 0;
-				int parse_status = psplinkParseCommand(cli);
+				int parse_status = send_input_to_psplink(cli);
 				if(parse_status < 0)
 				{
 					pspDebugScreenPrintf("%s: cmd parsed failed, %d, terminating\n", __func__, parse_status);
