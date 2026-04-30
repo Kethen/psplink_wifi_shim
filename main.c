@@ -25,6 +25,7 @@
 
 #include <string.h>
 #include <stdio.h>
+#include <stdarg.h>
 
 #define LOG_PATH "ms0:/psplink_wifi_shim.log"
 #define LOG(...){ \
@@ -47,6 +48,233 @@
 }
 
 PSP_MODULE_INFO("psplink_wifi_shim", PSP_MODULE_KERNEL, 1, 0);
+
+// vsnprintf from aemu, likely by mrcoldbird, or imported from somewhere by mrcoldbird
+static int itostr(char *buf, int in_data, int base, int upper, int sign)
+{
+	int res, len, i;
+	unsigned int data;
+	char *str;
+
+	if(base==10 && sign && in_data<0){
+		data = -in_data;
+	}else{
+		data = in_data;
+	}
+
+	str = buf;
+	do{
+		res = data%base;
+		data = data/base;
+		if(res<10){
+			res += '0';
+		}else{
+			if(upper){
+				res += 'A'-10;
+			}else{
+				res += 'a'-10;
+			}
+		}
+		*str++ = res;
+	}while(data);
+	len = str-buf;
+
+	/* reverse digital order */
+	for(i=0; i<len/2; i++){
+		res = buf[i];
+		buf[i] = buf[len-1-i];
+		buf[len-1-i] = res;
+	}
+
+	return len;
+}
+
+#define OUT_C(c) \
+if(str<end){ \
+	*str++ = (c); \
+} else { \
+	goto exit; \
+}
+static int _vsnprintf(char *buf, size_t size, const char *fmt, va_list args)
+{
+	static char digital_buf[32] = {0};
+	char ch, *s, *str, *end, *sstr;
+	int zero_pad, left_adj, add_sign, field_width, sign;
+	int i, base, upper, len;
+
+	if(!buf || !fmt ||!size){
+		return 0;
+	}
+
+	str = buf;
+	end = buf+size;
+
+	while(*fmt){
+		if(*fmt!='%'){
+			OUT_C(*fmt++);
+			continue;
+		}
+
+		/* skip '%' */
+		sstr = (char *)fmt;
+		fmt++;
+
+		/* %% */
+		if(*fmt=='%'){
+			OUT_C(*fmt++);
+			continue;
+		}
+
+		/* get flag */
+		zero_pad = ' ';
+		left_adj = 0;
+		add_sign = 0;
+		while((ch=*fmt)){
+
+			if(*fmt=='0'){
+				zero_pad = '0';
+			}else if(*fmt=='-'){
+				left_adj = 1;
+			}else if(*fmt=='#'){
+			}else if(*fmt==' '){
+				if(add_sign!='+')
+					add_sign = ' ';
+			}else if(*fmt=='+'){
+				add_sign = '+';
+			}else{
+				break;
+			}
+			fmt++;
+		}
+
+		/* get field width: m.n */
+		field_width = 0;
+		/* get m */
+		while(*fmt && *fmt>'0' && *fmt<='9'){
+			field_width = field_width*10+(*fmt-'0');
+			fmt++;
+		}
+		if(*fmt && *fmt=='.'){
+			fmt++;
+			/* skip n */
+			while(*fmt && *fmt>'0' && *fmt<='9'){
+				fmt++;
+			}
+		}
+
+		/* get format char */
+		upper = 0;
+		base = 0;
+		sign = 0;
+		len = 0;
+		s = digital_buf;
+		while((ch=*fmt)){
+			fmt++;
+			switch(ch){
+				/* hexadecimal */
+				case 'p':
+				case 'X':
+					upper = 1;
+				case 'x':
+					base = 16;
+					break;
+
+					/* decimal */
+					case 'd':
+					case 'i':
+						sign = 1;
+					case 'u':
+						base = 10;
+						break;
+
+						/* octal */
+						case 'o':
+							base = 8;
+							break;
+
+							/* character */
+							case 'c':
+								digital_buf[0] = (unsigned char) va_arg(args, int);
+								len = 1;
+								break;
+
+								/* string */
+								case 's':
+									s = va_arg(args, char *);
+									if(!s) s = "<NUL>";
+									len = strlen(s);
+				break;
+
+				/* float format, skip it */
+				case 'e': case 'E': case 'f': case 'F': case 'g': case 'G': case 'a': case 'A':
+					va_arg(args, double);
+					s = NULL;
+					break;
+
+					/* length modifier */
+					case 'l': case 'L': case 'h': case 'j': case 'z': case 't':
+						/* skip it */
+						continue;
+
+						/* bad format */
+						default:
+							s = sstr;
+							len = fmt-sstr;
+							break;
+			}
+			break;
+		}
+
+		if(base){
+			i = va_arg(args, int);
+			if(base==10 && sign){
+				if(i<0){
+					add_sign = '-';
+				}
+			}else{
+				add_sign = 0;
+			}
+
+			len = itostr(digital_buf, i, base, upper, sign);
+		}else{
+			zero_pad = ' ';
+			add_sign = 0;
+		}
+
+		if(s){
+			if(len>=field_width){
+				field_width = len;
+				if(add_sign)
+					field_width++;
+			}
+			for(i=0; i<field_width; i++){
+				if(left_adj){
+					if(i<len){
+						OUT_C(*s++);
+					}else{
+						OUT_C(' ');
+					}
+				}else{
+					if(add_sign && (zero_pad=='0' || i==(field_width-len-1))){
+						OUT_C(add_sign);
+						add_sign = 0;
+						continue;
+					}
+					if(i<(field_width-len)){
+						OUT_C(zero_pad);
+					}else{
+						OUT_C(*s++);
+					}
+				}
+			}
+		}
+	}
+
+	OUT_C(0);
+
+	exit:
+	return str-buf;
+}
 
 static int is_vita(){
 	static int vita = -1;
@@ -229,7 +457,9 @@ static int (*create_thread_orig)(const char *name, void *entry, int priority, in
 static int create_thread(const char *name, void *entry, int priority, int stack_size, int attr, void *option){
 	if (strcmp(name, "netshell recv thread") == 0 ||
 		strcmp(name, "netshell send thread") == 0 ||
-		strcmp(name, "netshell main") == 0
+		strcmp(name, "netshell main") == 0 ||
+		strcmp(name, "SceNetNetintr") == 0 ||
+		strcmp(name, "SceNetCallout") == 0
 	){
 		static SceKernelThreadOptParam opt = {.size = sizeof(SceKernelThreadOptParam), .stackMpid = 0};
 		opt.stackMpid = partition_to_use();
@@ -240,7 +470,6 @@ static int create_thread(const char *name, void *entry, int priority, int stack_
 	}
 	if (strcmp(name, "PspLinkParse") == 0){
 		return create_thread_orig(name, entry, priority, stack_size, attr, option);
-
 	}
 
 	return create_thread_orig(name, entry, priority, stack_size, attr, option);
@@ -338,8 +567,11 @@ int send_input_to_psplink_thread_func(unsigned int args, void *arg){
 		if (fast_path != NULL){
 			// just need to block here, the other side does not handle message status
 			// blocking here also fixes parse sychrnoization issues during parsing
+			//LOG("%s: using fast path parsing\n", __func__);
 			fast_path(to_psplink_input);
+			//LOG("%s: fast path parsing finished, printing prompt\n", __func__);
 			if (print_prompt != NULL) print_prompt();
+			//LOG("%s: prompt print finished\n", __func__);
 			psplink_input_ret = 0;
 			to_psplink_input = NULL;
 			continue;
@@ -363,8 +595,94 @@ int send_input_to_psplink(const char *input){
 }
 
 void create_psplink_send_thread(){
-	int tid = sceKernelCreateThread("psplink_wifi_shim stack hack", send_input_to_psplink_thread_func, 0x18, 256 * 1024, 0, NULL);
+	int tid = sceKernelCreateThread("psplink_wifi_shim stack hack", send_input_to_psplink_thread_func, 90, 256 * 1024, 0, NULL);
 	sceKernelStartThread(tid, 0, NULL);
+}
+
+int (*is_cpu_intr_enable_function)() = NULL;
+uint32_t get_is_cpu_intr_enable_function(){
+	if (is_cpu_intr_enable_function == NULL){
+		is_cpu_intr_enable_function = (void *)sctrlHENFindFunction("sceKernelLibrary", "Kernel_Library", 0xB55249D2);
+	}
+	return (uint32_t)is_cpu_intr_enable_function;
+}
+
+static int (*buffer_consumer)(const char *, int size) = NULL;
+static char *buffer_data = NULL;
+static unsigned int buffer_max_size = 0;
+static unsigned int *buffer_size = NULL;
+static int *buffer_lock = NULL;
+static int *buffer_cur_sock = NULL;
+static int fill_buffer(const char *c, int s){
+	if (is_cpu_intr_enable_function == NULL){
+		get_is_cpu_intr_enable_function();
+	}
+
+	if (buffer_consumer == NULL){
+		return s;
+	}
+
+	if (*buffer_cur_sock < 0){
+		return s;
+	}
+
+	if (!is_cpu_intr_enable_function() && *buffer_lock){
+		return s;
+	}
+
+	int total_wait_time = 0;
+	while(*buffer_lock){
+		sceKernelDelayThread(5000);
+		total_wait_time += 5000;
+		if (total_wait_time >= 1000000){
+			return s;
+		}
+	}
+	*buffer_lock = 1;
+	if (*buffer_size + s <= buffer_max_size){
+		memcpy(&buffer_data[*buffer_size], c, s);
+		*buffer_size = *buffer_size + s;
+	}
+	*buffer_lock = 0;
+	return s;
+}
+
+void register_buffer_consumer(void *consumer, char *data, unsigned int max_size, unsigned int *size, int *lock, int *cur_sock){
+	buffer_consumer = consumer;
+	buffer_data = data;
+	buffer_max_size = max_size;
+	buffer_size = size;
+	buffer_lock = lock;
+	buffer_cur_sock = cur_sock;
+
+	void (*tty_set_wifi_handler)(void *handler) = (void *)sctrlHENFindFunction("PSPLINK", "psplink", 0x4DFA5010);
+	//tty_set_wifi_handler(consumer);
+	// calling a user function from kernel does not always work properly, prone to randdom crashes
+	tty_set_wifi_handler(fill_buffer);
+}
+
+static int (*printf_orig)(const char *fmt, ...) = NULL;
+static int printf_patched(const char *fmt, ...){
+	static char buf[256] = {0};
+	va_list args;
+	va_start(args, fmt);
+	int len = _vsnprintf(buf, sizeof(buf), fmt, args);
+	va_end(args);
+	#if 1
+	if (buffer_consumer != NULL){
+		//buffer_consumer(buf, len);
+		fill_buffer(buf, len);
+	}
+	#else
+	LOG("%s", buf);
+	#endif
+	return len;
+}
+
+static void hook_printf(){
+	// tty handler calling is also prone to crahses, let's do a bypass
+	uint32_t proc = sctrlHENFindFunction("sceIOFileManager", "StdioForKernel", 0xCAB439DF);
+	HIJACK_FUNCTION(proc, printf_patched, printf_orig);
 }
 
 int module_start(SceSize args, void *argp){
@@ -376,6 +694,7 @@ int module_start(SceSize args, void *argp){
 	memlayout_hack();
 	log_memory_info();
 	create_psplink_send_thread();
+	hook_printf();
 	return 0;
 }
 

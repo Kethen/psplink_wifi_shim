@@ -35,6 +35,8 @@ const char* modNetGetIpAddress(void);
 #define MODULE_NAME "NetShell"
 #define WELCOME_MESSAGE "Welcome to PSPLink's NetShell\n"
 
+#define LOG_OUTPUT_TO_FILE 0
+
 PSP_MODULE_INFO(MODULE_NAME, 0, 1, 1);
 PSP_MAIN_THREAD_NAME("NetShell");
 
@@ -86,6 +88,7 @@ int g_data_lock = 0;
 #define SERVER_PORT 10000
 
 static int (*kernel_delay_thread_function)(unsigned int delay) = NULL;
+static int (*is_cpu_intr_enable_function)() = NULL;
 
 static int kernel_print_callback(const char *data, int size)
 {
@@ -94,6 +97,10 @@ static int kernel_print_callback(const char *data, int size)
 	}
 
 	int total_wait_time = 0;
+	if (!is_cpu_intr_enable_function() && g_data_lock){
+		// we can't wait in this case
+		return size;
+	}
 	while(g_data_lock)
 	{
 		if (total_wait_time > 100000){
@@ -104,7 +111,7 @@ static int kernel_print_callback(const char *data, int size)
 	}
 	g_data_lock = 1;
 
-	if (size + g_size < sizeof(g_data)){
+	if (size + g_size <= sizeof(g_data)){
 		memcpy(&g_data[g_size], data, size);
 		g_size += size;
 	}
@@ -139,10 +146,12 @@ static int make_socket(uint16_t port)
 }
 
 static int send_thread_func(unsigned int args, void *argp){
+	#if LOG_OUTPUT_TO_FILE
 	int fd = sceIoOpen("ms0:/netshell.txt", PSP_O_TRUNC | PSP_O_CREAT | PSP_O_WRONLY, 0777);
 	if (fd >= 0){
 		sceIoClose(fd);
 	}
+	#endif
 	while(1){
 		if (g_currsock < 0){
 			sceKernelDelayThread(100000);
@@ -166,11 +175,14 @@ static int send_thread_func(unsigned int args, void *argp){
 		g_size = 0;
 		g_data_lock = 0;
 
+		#if LOG_OUTPUT_TO_FILE
 		fd = sceIoOpen("ms0:/netshell.txt", PSP_O_APPEND | PSP_O_CREAT | PSP_O_WRONLY, 0777);
 		if (fd >= 0){
 			sceIoWrite(fd, data_copy, size);
 			sceIoClose(fd);
 		}
+		#endif
+
 		//pspDebugScreenPrintf("%s: starting send of %d bytes of data\n", __func__, size);
 		int send_status = 0;
 		#if 1
@@ -262,7 +274,7 @@ static int recv_thread_func(unsigned int args, void *argp){
 					close(currsock);
 					psplinkExitShell();
 				}
-				sceKernelDelayThread(500000);
+				sceKernelDelayThread(250000);
 			}
 		}
 		else if(pos < (sizeof(cli) -1))
@@ -275,6 +287,7 @@ static int recv_thread_func(unsigned int args, void *argp){
 }
 
 
+void register_buffer_consumer(void *consumer, char *data, unsigned int max_size, unsigned int *size, int *lock, int *cur_sock);
 /* Start a simple tcp echo server */
 static void start_server(const char *szIpAddr)
 {
@@ -282,12 +295,13 @@ static void start_server(const char *szIpAddr)
 	int sock;
 	struct sockaddr_in client;
 
-	int tid = sceKernelCreateThread("netshell recv thread", recv_thread_func, 0x18, 8192, 0, NULL);
+	int tid = sceKernelCreateThread("netshell recv thread", recv_thread_func, 50, 8192, 0, NULL);
 	sceKernelStartThread(tid, 0, NULL);
-	tid = sceKernelCreateThread("netshell send thread", send_thread_func, 0x18, 8192, 0, NULL);
+	tid = sceKernelCreateThread("netshell send thread", send_thread_func, 50, 8192, 0, NULL);
 	sceKernelStartThread(tid, 0, NULL);
 
-	ttySetWifiHandler(kernel_print_callback);
+	//ttySetWifiHandler(kernel_print_callback);
+	register_buffer_consumer(kernel_print_callback, g_data, sizeof(g_data), &g_size, &g_data_lock, &g_currsock);
 
 	/* Create a socket for listening */
 	sock = make_socket(SERVER_PORT);
@@ -345,13 +359,16 @@ static void start_server(const char *szIpAddr)
 }
 
 void *get_kernel_delay_thread_function();
+void *get_is_cpu_intr_enable_function();
 /* Simple thread */
 static int main_thread_func(unsigned int args, void *arg)
 {
 	pspDebugScreenPrintf("PSPLink NetShell (c) 2k6 TyRaNiD\n");
 
 	kernel_delay_thread_function = get_kernel_delay_thread_function();
+	is_cpu_intr_enable_function = get_is_cpu_intr_enable_function();
 	pspDebugScreenPrintf("%s: kernel delay thread function is at 0x%lx\n", __func__, (uint32_t)kernel_delay_thread_function);
+	pspDebugScreenPrintf("%s: is cpu intr enable function is at 0x%lx\n", __func__, (uint32_t)is_cpu_intr_enable_function);
 
 	if(modNetIsInit() >= 0)
 	{
@@ -364,7 +381,7 @@ static int main_thread_func(unsigned int args, void *arg)
 }
 
 int module_start(SceSize args, void *argp){
-	int tid = sceKernelCreateThread("netshell main", main_thread_func, 0x18, 8192, 0, NULL);
+	int tid = sceKernelCreateThread("netshell main", main_thread_func, 50, 8192, 0, NULL);
 	sceKernelStartThread(tid, 0, NULL);
 	return 0;
 }

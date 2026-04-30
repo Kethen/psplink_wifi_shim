@@ -19,7 +19,7 @@ jobs:
 
     - name: Build
       run: |
-        docker run --rm -i -v ./:/work_dir -w /work_dir "$PSPDEV_TAG" bash -c 'make; cd netshell; make'
+        docker run --rm -i -v ./:/work_dir -w /work_dir "$PSPDEV_TAG" bash -c 'set -xe; make; cd netshell; make'
 
     - name: Push package artifact
       uses: actions/upload-artifact@v4

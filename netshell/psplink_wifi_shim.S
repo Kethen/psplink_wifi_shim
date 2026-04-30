@@ -5,4 +5,6 @@
 	STUB_START "psplink_wifi_shim",0x40090000,0x000C0005
 	STUB_FUNC  0x001,get_kernel_delay_thread_function
 	STUB_FUNC  0x002,send_input_to_psplink
+	STUB_FUNC  0x003,register_buffer_consumer
+	STUB_FUNC  0x004,get_is_cpu_intr_enable_function
 	STUB_END

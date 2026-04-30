@@ -6,6 +6,7 @@ podman run \
 	-w /work_dir \
 	$TAG \
 	bash -c "
+set -xe
 make clean
 make
 cd netshell
