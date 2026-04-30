@@ -339,6 +339,8 @@ static void start_server(const char *szIpAddr)
 		setsockopt(new_sock, SOL_SOCKET, SO_RCVBUF, &sockopt, sizeof(sockopt));
 		sockopt = 1;
 		setsockopt(new_sock, IPPROTO_TCP, TCP_NODELAY, &sockopt, sizeof(sockopt));
+		sockopt = 1;
+		setsockopt(new_sock, SOL_SOCKET, SO_KEEPALIVE, &sockopt, sizeof(sockopt));
 
 		printf("New connection %d from %s:%d\n", new_sock,
 				inet_ntoa(client.sin_addr),

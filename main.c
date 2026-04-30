@@ -530,9 +530,27 @@ static void *find_module_func_offset_by_pattern(const char *mod_name, const uint
 	return NULL;
 }
 
+static int fill_buffer(const char *c, int s);
+static void log_memory_info_wifi(){
+	PspSysmemPartitionInfo meminfo = {0};
+	meminfo.size = sizeof(PspSysmemPartitionInfo);
+	for(int i = 1;i < 13;i++){
+		int query_status = sceKernelQueryMemoryPartitionInfo(i, &meminfo);\
+		static char buf[256];
+		int len = 0;
+		if (query_status == 0){
+			int max_free = sceKernelPartitionMaxFreeMemSize(i);
+			int total_free = sceKernelPartitionTotalFreeMemSize(i);
+			len = sprintf(buf, "%s: p%d startaddr 0x%x size %d attr 0x%x max %d total %d\n", __func__, i, meminfo.startaddr, meminfo.memsize, meminfo.attr, max_free, total_free);
+		}else{
+			len = sprintf(buf, "%s: p%d query failed, 0x%x\n", __func__, i, query_status);
+		}
+		fill_buffer(buf, len);
+	}
+}
+
 static const char *to_psplink_input = NULL;
 static int psplink_input_ret = 2;
-
 int send_input_to_psplink_thread_func(unsigned int args, void *arg){
 	// this is funky, last release of wifi psplink sends a mbx on stack memory, so this is to create stable-ish stack memory for that function
 	while(1){
@@ -557,11 +575,37 @@ int send_input_to_psplink_thread_func(unsigned int args, void *arg){
 			fast_path = find_module_func_offset_by_pattern("PSPLINK", pattern, sizeof(pattern));
 			LOG("%s: fast_path found at 0x%x\n", __func__, (unsigned int)fast_path);
 		}
+
 		if (psplink_parse == NULL && fast_path == NULL){
 			// psplink is likely not loaded yet
 			psplink_input_ret = 0;
 			to_psplink_input = NULL;
 			continue;
+		}
+
+		// extended commands that can be done here
+		if (strcmp(to_psplink_input, "meminfo2") == 0){
+			log_memory_info_wifi();
+			if (print_prompt != NULL) print_prompt();
+			psplink_input_ret = 0;
+			to_psplink_input = NULL;
+			continue;
+		}
+
+		if (strcmp(to_psplink_input, "exit2") == 0){
+			if (print_prompt != NULL) print_prompt();
+			psplink_input_ret = 0;
+			to_psplink_input = NULL;
+			sctrlKernelExitVSH(NULL);
+			continue;
+		}
+
+		if (strcmp(to_psplink_input, "help") == 0){
+			static char buf[256];
+			int len = sprintf(buf, "%s", "psplink_wifi_shim extra commands:\n\n");
+			len += sprintf(&buf[len], "%s", "  meminfo2 - meminfo with more partitions\n");
+			len += sprintf(&buf[len], "%s", "  exit2 - run sctrlKernelExitVSH(NULL), useful in Adrenaline\n\n");
+			fill_buffer(buf, len);
 		}
 
 		if (fast_path != NULL){
